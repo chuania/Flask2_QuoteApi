@@ -1,7 +1,8 @@
+*env
 .idea/
 .vscode/
-__pycache__/
-tmp/
-*env/
-*.db
 *.pyc
+__pycache__
+*.code-workspace
+*.db
+.DS_Store

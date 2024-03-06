@@ -1,57 +1,65 @@
-from api import app, db, request
+from flask import jsonify, request
+from api import app, db, multi_auth
 from api.models.author import AuthorModel
 from api.models.quote import QuoteModel
+from api.schemas.quote import quote_schema, quotes_schema
 
 
-@app.route('/quotes', methods=["GET"])
-@app.route('/quotes/<int:quote_id>', methods=["GET"])
-@app.route('/authors/<int:author_id>/quotes', methods=["GET"])
-def get_quotes(author_id=None, quote_id=None):
-    """
-    Обрабатываем GET запросы
-    :param author_id: id автора
-    :param quote_id: id цитаты
-    :return: http-response(json, статус)
-    """
-    print(f"{author_id=} {quote_id=}")
-    if author_id is None and quote_id is None:  # Если запрос приходит по url: /quotes
-        quotes = QuoteModel.query.all()
-        return [quote.to_dict() for quote in quotes]  # Возвращаем ВСЕ цитаты
+@app.route("/quotes", methods=["GET"])
+def quotes():
+    quotes = QuoteModel.query.all()
+    return quotes_schema.dump(quotes), 200
 
-    if author_id:  # Если запрос приходит по url: /authors/<int:author_id>/quotes
-        author = AuthorModel.query.get(author_id)
-        quotes = author.quotes.all()
-        return [quote.to_dict() for quote in quotes], 200  # Возвращаем все цитаты автора
 
-    # Если запрос приходит по url: /quotes/<int:quote_id>
+@app.get("/quotes/<int:quote_id>")
+def quote_by_id(quote_id):
     quote = QuoteModel.query.get(quote_id)
     if quote is not None:
-        return quote.to_dict(), 200
-    return {"Error": "Quote not found"}, 404
+        return quote_schema.dump(quote), 200
+    return {"Error": f"Quote with id={quote_id} not found"}, 404
 
 
-@app.route('/authors/<int:author_id>/quotes', methods=["POST"])
+@app.get("/authors/<int:author_id>/quotes")
+def quotes_by_author_id(author_id):
+    author = AuthorModel.query.get(author_id)
+    if author is None:
+        return {"Error": f"Author id={author_id} not found"}, 404
+    quotes = author.quotes.all()
+    return quotes_schema.dump(quotes), 200
+
+
+@app.post("/authors/<int:author_id>/quotes")
+@multi_auth.login_required
 def create_quote(author_id):
     quote_data = request.json
     author = AuthorModel.query.get(author_id)
     if author is None:
         return {"Error": f"Author id={author_id} not found"}, 404
-
-    quote = QuoteModel(author, quote_data["text"])
+    quote = QuoteModel(author, **quote_data)
     db.session.add(quote)
     db.session.commit()
-    return quote.to_dict(), 201
+    return jsonify(quote_schema.dump(quote)), 201
 
 
-@app.route('/quotes/<int:id>', methods=["PUT"])
+@app.put("/quotes/<int:quote_id>")
+@multi_auth.login_required
 def edit_quote(quote_id):
     quote_data = request.json
     quote = QuoteModel.query.get(quote_id)
-    quote.text = quote_data["text"]
+    if quote is None:
+        return {"Error": f"quote with id={quote_id} not found"}, 404
+    for key, value in quote_data.items():
+        setattr(quote, key, value)
     db.session.commit()
-    return quote.to_dict(), 200
+    return quote_schema.dump(quote), 200
 
 
-@app.route('/quotes/<int:quote_id>', methods=["DELETE"])
+@app.route("/quotes/<int:quote_id>", methods=["DELETE"])
+@multi_auth.login_required
 def delete_quote(quote_id):
-    raise NotImplemented("Метод не реализован")
+    quote = QuoteModel.query.get(quote_id)
+    if quote is None:
+        return f"Quote with id={quote_id} not found", 404
+    db.session.delete(quote)
+    db.session.commit()
+    return {"message": f"Quote with id={quote_id} has deleted"}, 200
